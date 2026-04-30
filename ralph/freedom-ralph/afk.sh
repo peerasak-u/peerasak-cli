@@ -59,7 +59,8 @@ $prompt"
   echo "$context" > "$CONTEXT_FILE"
 
   # Send command to read from temp file and pipe to pi
-  cmux send --surface "$RALPH_SURFACE" "cat $CONTEXT_FILE | pi -p --no-session\n"
+  cmux send --surface "$RALPH_SURFACE" "cat $CONTEXT_FILE | pi -p
+"
 
   # Clean up temp file
   rm -f "$CONTEXT_FILE"
