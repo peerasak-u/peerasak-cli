@@ -17,7 +17,7 @@ SPLIT=$(cmux new-split right 2>&1)
 echo "SPLIT: $SPLIT"
 
 # Extract surface ref
-RALPH_SURFACE=$(echo "$SPLIT" | grep -oP 'surface:\d+' || echo "")
+RALPH_SURFACE=$(echo "$SPLIT" | grep -oE 'surface:[0-9]+' || echo "")
 
 if [ -z "$RALPH_SURFACE" ]; then
   echo "Error: Failed to create Ralph's pane"

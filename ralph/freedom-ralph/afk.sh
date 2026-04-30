@@ -33,7 +33,7 @@ for ((i=1; i<=ITERATIONS; i++)); do
   echo "SPLIT: $SPLIT"
   
   # Extract surface ref (format: "OK surface:XX pane:XX workspace:XX")
-  RALPH_SURFACE=$(echo "$SPLIT" | grep -oP 'surface:\d+' || echo "")
+  RALPH_SURFACE=$(echo "$SPLIT" | grep -oE 'surface:[0-9]+' || echo "")
   
   if [ -z "$RALPH_SURFACE" ]; then
     echo "Error: Failed to create Ralph's pane"
