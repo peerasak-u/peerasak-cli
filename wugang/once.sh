@@ -3,11 +3,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WUGANG_DIR="$(dirname "$SCRIPT_DIR")"
+PROGRESS_FILE="$WUGANG_DIR/progress.txt"
 
 if [ -z "$CMUX_SOCKET_PATH" ]; then
   echo "Error: Not running inside cmux. Please run from a cmux terminal."
   exit 1
 fi
+
+touch "$PROGRESS_FILE"
 
 echo "Starting Wu Gang (single iteration)..."
 echo ""
@@ -90,6 +93,10 @@ cmux close-surface --surface "$SURFACE" 2>/dev/null || true
 echo ""
 if [ "$DONE" = true ]; then
   echo "✓ Wu Gang finished the issue."
+  echo "[$(date)] Done: single iteration" >> "$PROGRESS_FILE"
+  exit 0
 else
   echo "⚠ Wu Gang stopped (timed out or closed)."
+  echo "[$(date)] Warning: single iteration incomplete" >> "$PROGRESS_FILE"
+  exit 1
 fi

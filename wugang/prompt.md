@@ -6,12 +6,15 @@ You are an autonomous coding agent. Work through GitHub issues while you're AFK.
 
 1. Read open GitHub issues via: `gh issue list --state open --json number,title,body,labels,comments`
 2. Filter to only issues with the `AFK` label — SKIP any issue labeled `HITL` (Human In The Loop)
-3. Prioritize in this order:
-   - Critical bugfixes
-   - Development infrastructure (tests, types, scripts)
-   - Tracer bullets (small end-to-end slices of new features)
-   - Polish and quick wins
-   - Refactors
+3. Prioritize issues by their labels in this order:
+   - **Priority 1**: `critical`, `bug` — Critical bugfixes
+   - **Priority 2**: `infrastructure`, `tests`, `types`, `scripts` — Dev infrastructure
+   - **Priority 3**: `tracer-bullet`, `feature` — Tracer bullets (small end-to-end slices)
+   - **Priority 4**: `polish`, `quick-win` — Polish and quick wins
+   - **Priority 5**: `refactor` — Refactors
+
+   If an issue has no priority label, treat it as Priority 5 (lowest).
+   If multiple issues share the same priority, pick the one with the lowest issue number.
 
 4. Pick ONE issue to work on. Never work on multiple simultaneously.
 
