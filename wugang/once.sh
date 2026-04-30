@@ -45,7 +45,7 @@ sleep 0.5
 
 # Step 2: Build context (commits + issues + prompt)
 commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits")
-issues=$(gh issue list --state open --label AFK --json number,title,body,labels,comments 2>/dev/null || echo "[]")
+issues=$(gh issue list --state open --label AFK --json number,title,labels 2>/dev/null || echo "[]")
 prompt=$(cat "$SCRIPT_DIR/prompt.md")
 
 context="Previous commits:
@@ -69,25 +69,37 @@ cmux send --surface "$SURFACE" "pi @$CONTEXT_FILE
 "
 
 echo "Wu Gang is running in the right pane..."
-echo "Waiting for completion signal: <promise>ISSUE DONE</promise>"
 echo ""
 
-# Step 5: Poll scrollback for completion sentinel
+# Step 4b: Wait 10s for pi to display context, establish baseline
+echo "Establishing baseline..."
+sleep 10
+
+# Capture scrollback line count as baseline
+BASELINE_LINES=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | wc -l)
+echo "Baseline: $BASELINE_LINES lines"
+echo ""
+
+# Step 5: Poll for completion - only check NEW lines after baseline
 DONE=false
 TIMEOUT=1800  # 30 minutes max
 POLL_INTERVAL=2
 
 for ((poll=1; poll<=TIMEOUT; poll++)); do
   sleep $POLL_INTERVAL
-  
-  # Read scrollback from the pane
-  output=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 200 2>/dev/null || echo "")
-  
-  if echo "$output" | grep -q "<promise>ISSUE DONE</promise>"; then
-    DONE=true
-    break
+
+  # Only look at lines that appeared AFTER baseline
+  current_lines=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | wc -l)
+  new_lines=$((current_lines - BASELINE_LINES))
+
+  if [ $new_lines -gt 0 ]; then
+    new_output=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | tail -n $new_lines)
+    if echo "$new_output" | grep -q "<promise>ISSUE DONE</promise>"; then
+      DONE=true
+      break
+    fi
   fi
-  
+
   # Check if pane is still alive
   if ! cmux tree 2>/dev/null | grep -q "surface:$SURFACE_NUM"; then
     echo "Pane closed unexpectedly"
