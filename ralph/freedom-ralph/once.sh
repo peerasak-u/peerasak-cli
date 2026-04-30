@@ -41,8 +41,15 @@ $issues
 
 $prompt"
 
-# Send context to Ralph's pane
-cmux send --surface "$RALPH_SURFACE" "$(printf '%s\n' "$context")"
+# Write context to temp file
+CONTEXT_FILE="/tmp/ralph_ctx_$$.txt"
+echo "$context" > "$CONTEXT_FILE"
+
+# Send command to read from temp file and pipe to pi
+cmux send --surface "$RALPH_SURFACE" "cat $CONTEXT_FILE | pi -p --no-session\n"
+
+# Clean up temp file
+rm -f "$CONTEXT_FILE"
 
 echo "Ralph is running in the right pane. Waiting for completion..."
 

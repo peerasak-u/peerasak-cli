@@ -22,9 +22,6 @@ touch "$PROGRESS_FILE"
 echo "Starting freedom-ralph for $ITERATIONS iterations..."
 echo ""
 
-# Detect if we're in a split or surface (use parent if nested)
-CURRENT_SURFACE="${CMUX_SURFACE_ID:-}"
-
 for ((i=1; i<=ITERATIONS; i++)); do
   echo "=== Iteration $i/$ITERATIONS ==="
 
@@ -32,7 +29,7 @@ for ((i=1; i<=ITERATIONS; i++)); do
   SPLIT=$(cmux new-split right 2>&1)
   echo "SPLIT: $SPLIT"
   
-  # Extract surface ref (format: "OK surface:XX pane:XX workspace:XX")
+  # Extract surface ref
   RALPH_SURFACE=$(echo "$SPLIT" | grep -oE 'surface:[0-9]+' || echo "")
   
   if [ -z "$RALPH_SURFACE" ]; then
@@ -57,8 +54,15 @@ $issues
 
 $prompt"
 
-  # Send context to Ralph's pane (escaped for shell)
-  cmux send --surface "$RALPH_SURFACE" "$(printf '%s\n' "$context")"
+  # Write context to temp file
+  CONTEXT_FILE="/tmp/ralph_ctx_$$_$i.txt"
+  echo "$context" > "$CONTEXT_FILE"
+
+  # Send command to read from temp file and pipe to pi
+  cmux send --surface "$RALPH_SURFACE" "cat $CONTEXT_FILE | pi -p --no-session\n"
+
+  # Clean up temp file
+  rm -f "$CONTEXT_FILE"
   
   # Wait for Ralph to finish
   DONE=false
