@@ -1,0 +1,125 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WUGANG_DIR="$(dirname "$SCRIPT_DIR")"
+PROGRESS_FILE="$WUGANG_DIR/progress.txt"
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 <iterations>"
+  echo "Example: $0 10"
+  exit 1
+fi
+
+if [ -z "$CMUX_SOCKET_PATH" ]; then
+  echo "Error: Not running inside cmux. Please run from a cmux terminal."
+  exit 1
+fi
+
+ITERATIONS=$1
+touch "$PROGRESS_FILE"
+
+echo "Starting Wu Gang for $ITERATIONS iterations..."
+echo ""
+
+for ((i=1; i<=ITERATIONS; i++)); do
+  echo "=== Iteration $i/$ITERATIONS ==="
+
+  # Step 1: Create right split pane
+  SPLIT_OUTPUT=$(cmux new-split right 2>&1)
+  echo "Created split: $SPLIT_OUTPUT"
+
+  # Extract surface ref
+  SURFACE=$(echo "$SPLIT_OUTPUT" | grep -oE 'surface:[0-9]+' | head -1)
+
+  if [ -z "$SURFACE" ]; then
+    echo "Error: Failed to create Wu Gang's pane"
+    exit 1
+  fi
+
+  SURFACE_NUM="${SURFACE#surface:}"
+  echo "Surface ID: $SURFACE_NUM"
+
+  sleep 0.5
+
+  # Step 2: Build context (commits + issues + prompt)
+  commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits")
+  issues=$(gh issue list --state open --label AFK --json number,title,body,labels,comments 2>/dev/null || echo "[]")
+  prompt=$(cat "$SCRIPT_DIR/prompt.md")
+
+  context="Previous commits:
+$commits
+
+Open GitHub issues (AFK only):
+$issues
+
+---
+
+$prompt"
+
+  # Step 3: Write context to temp file (NOT piping - that breaks TUI)
+  CONTEXT_FILE="/tmp/wugang_ctx_$$_${i}_$(date +%s).txt"
+  echo "$context" > "$CONTEXT_FILE"
+  echo "Context written to: $CONTEXT_FILE"
+
+  # Step 4: Send pi command with @file syntax
+  cmux send --surface "$SURFACE" "pi @$CONTEXT_FILE
+"
+
+  echo "Wu Gang is running in the right pane..."
+  echo ""
+
+  # Step 5: Poll scrollback for completion sentinel
+  DONE=false
+  TIMEOUT=1800  # 30 minutes per issue
+  POLL_INTERVAL=2
+
+  for ((poll=1; poll<=TIMEOUT; poll++)); do
+    sleep $POLL_INTERVAL
+    
+    # Read scrollback from the pane
+    output=$(cmux read-screen --surface "$SURFACE" --scrollback --lines 200 2>/dev/null || echo "")
+    
+    if echo "$output" | grep -q "<promise>ISSUE DONE</promise>"; then
+      DONE=true
+      break
+    fi
+    
+    # Check if pane is still alive
+    if ! cmux tree 2>/dev/null | grep -q "surface:$SURFACE_NUM"; then
+      echo "Pane closed unexpectedly"
+      break
+    fi
+  done
+
+  # Clean up temp file
+  rm -f "$CONTEXT_FILE"
+
+  # Step 6: Close the pane
+  cmux close-surface --surface "$SURFACE" 2>/dev/null || true
+
+  # Log progress
+  if [ "$DONE" = true ]; then
+    echo "✓ Wu Gang finished issue"
+    echo "[$(date)] Done: iteration $i" >> "$PROGRESS_FILE"
+  else
+    echo "⚠ Wu Gang stopped (timed out or closed)"
+    echo "[$(date)] Warning: iteration $i incomplete" >> "$PROGRESS_FILE"
+  fi
+
+  # Check if there are more AFK issues
+  remaining=$(gh issue list --state open --label AFK --json number 2>/dev/null | grep -c '"number"' || echo "0")
+  
+  if [ "$remaining" -eq 0 ]; then
+    echo ""
+    echo "✓ Wu Gang complete — no more AFK issues."
+    echo "[$(date)] Wu Gang stopped: NO MORE TASKS" >> "$PROGRESS_FILE"
+    exit 0
+  fi
+
+  echo ""
+done
+
+echo ""
+echo "Completed $ITERATIONS iterations."
+echo "[$(date)] Wu Gang stopped: $ITERATIONS iterations exhausted" >> "$PROGRESS_FILE"
