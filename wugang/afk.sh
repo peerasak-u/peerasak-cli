@@ -2,8 +2,13 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="${CMUX_TERMINAL_PWD:-$PWD}"
 WUGANG_DIR="$(dirname "$SCRIPT_DIR")"
-PROGRESS_FILE="$WUGANG_DIR/progress.txt"
+
+# Project-level .wugang/ directory
+WUGANG_DATA="$PROJECT_DIR/.wugang"
+mkdir -p "$WUGANG_DATA/context"
+PROGRESS_FILE="$WUGANG_DATA/progress.txt"
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <iterations>"
@@ -58,7 +63,7 @@ $issues
 $prompt"
 
   # Step 3: Write context to temp file (NOT piping - that breaks TUI)
-  CONTEXT_FILE="/tmp/wugang_ctx_$$_${i}_$(date +%s).txt"
+  CONTEXT_FILE="$WUGANG_DATA/context/wugang_ctx_$$_${i}_$(date +%s).txt"
   echo "$context" > "$CONTEXT_FILE"
   echo "Context written to: $CONTEXT_FILE"
 
