@@ -21,6 +21,12 @@ if [ -z "$CMUX_SOCKET_PATH" ]; then
   exit 1
 fi
 
+# Validate git repo
+if [ ! -d ".git" ]; then
+  echo "Error: Not a git repository. Wu Gang needs git + GitHub issues."
+  exit 1
+fi
+
 ITERATIONS=$1
 touch "$PROGRESS_FILE"
 
