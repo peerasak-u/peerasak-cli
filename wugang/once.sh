@@ -1,133 +1,23 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="${CMUX_TERMINAL_PWD:-$PWD}"
-WUGANG_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib.sh"
 
-# Project-level .wugang/ directory
-WUGANG_DATA="$PROJECT_DIR/.wugang"
-mkdir -p "$WUGANG_DATA/context"
-PROGRESS_FILE="$WUGANG_DATA/progress.txt"
-
-if [ -z "$CMUX_SOCKET_PATH" ]; then
-  echo "Error: Not running inside cmux. Please run from a cmux terminal."
-  exit 1
-fi
-
-# Validate git repo
-if [ ! -d ".git" ]; then
-  echo "Error: Not a git repository. Wu Gang needs git + GitHub issues."
-  exit 1
-fi
-
-# Prevent macOS idle system sleep while Wu Gang runs.
-if command -v caffeinate >/dev/null 2>&1; then
-  echo "Preventing system sleep while Wu Gang runs..."
-  caffeinate -i -w $$ &
-else
-  echo "Warning: caffeinate not found; system sleep will not be prevented."
-fi
-
-touch "$PROGRESS_FILE"
+setup_prereqs
+acquire_lock
+trap release_lock EXIT
 
 echo "Starting Wu Gang (single iteration)..."
 echo ""
 
-# Step 1: Create right split pane
-SPLIT_OUTPUT=$(cmux new-split right 2>&1)
-echo "Created split: $SPLIT_OUTPUT"
-
-# Extract surface ref (format: surface:123)
-SURFACE=$(echo "$SPLIT_OUTPUT" | grep -oE 'surface:[0-9]+' | head -1)
-
-if [ -z "$SURFACE" ]; then
-  echo "Error: Failed to create Wu Gang's pane"
-  exit 1
+if ! run_iteration 1 1; then
+  code=$?
+  if [ "$code" -eq 10 ]; then
+    echo "Wu Gang stopped: no eligible task right now."
+    exit 0
+  fi
+  exit "$code"
 fi
 
-SURFACE_NUM="${SURFACE#surface:}"
-echo "Surface ID: $SURFACE_NUM"
-
-sleep 0.5
-
-# Step 2: Build context (commits + issues + prompt)
-commits=$(git log -n 5 --format="%H%n%ad%n%B---" --date=short 2>/dev/null || echo "No commits")
-issues=$(gh issue list --state open --label AFK --json number,title,labels 2>/dev/null || echo "[]")
-prompt=$(cat "$SCRIPT_DIR/prompt.md")
-
-context="Previous commits:
-$commits
-
-Open GitHub issues (AFK only):
-$issues
-
----
-
-$prompt"
-
-# Step 3: Write context to temp file (NOT piping - that breaks TUI)
-CONTEXT_FILE="$WUGANG_DATA/context/wugang_ctx_$$_$(date +%s).txt"
-echo "$context" > "$CONTEXT_FILE"
-echo "Context written to: $CONTEXT_FILE"
-
-# Step 4: Send pi command with @file syntax (not piping)
-# The @ syntax tells pi to read context from file while keeping TTY intact
-cmux send --surface "$SURFACE" "pi @$CONTEXT_FILE
-"
-
-echo "Wu Gang is running in the right pane..."
-echo ""
-
-# Step 4b: Wait 10s for pi to display context, establish baseline
-echo "Establishing baseline..."
-sleep 10
-
-# Capture scrollback line count as baseline
-BASELINE_LINES=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | wc -l)
-echo "Baseline: $BASELINE_LINES lines"
-echo ""
-
-# Step 5: Poll for completion - only check NEW lines after baseline
-DONE=false
-TIMEOUT=1800  # 30 minutes max
-POLL_INTERVAL=2
-
-for ((poll=1; poll<=TIMEOUT; poll++)); do
-  sleep $POLL_INTERVAL
-
-  # Only look at lines that appeared AFTER baseline
-  current_lines=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | wc -l)
-  new_lines=$((current_lines - BASELINE_LINES))
-
-  if [ $new_lines -gt 0 ]; then
-    new_output=$(cmux read-screen --surface "$SURFACE" --lines 500 2>/dev/null | tail -n $new_lines)
-    if echo "$new_output" | grep -q "<promise>ISSUE DONE</promise>"; then
-      DONE=true
-      break
-    fi
-  fi
-
-  # Check if pane is still alive
-  if ! cmux tree 2>/dev/null | grep -q "surface:$SURFACE_NUM"; then
-    echo "Pane closed unexpectedly"
-    break
-  fi
-done
-
-# Clean up temp file
-rm -f "$CONTEXT_FILE"
-
-# Step 6: Close the pane
-cmux close-surface --surface "$SURFACE" 2>/dev/null || true
-
-echo ""
-if [ "$DONE" = true ]; then
-  echo "✓ Wu Gang finished the issue."
-  echo "[$(date)] Done: single iteration" >> "$PROGRESS_FILE"
-  exit 0
-else
-  echo "⚠ Wu Gang stopped (timed out or closed)."
-  echo "[$(date)] Warning: single iteration incomplete" >> "$PROGRESS_FILE"
-  exit 1
-fi
+echo "✓ Wu Gang finished single iteration."
