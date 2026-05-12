@@ -443,7 +443,7 @@ run_iteration() {
 
   cmux send --surface "$surface" "WUGANG_ISSUE=$issue pi @$context_file
 " >/dev/null
-  ui_info "Waiting for agent signal for #$issue…"
+  ui_info "Waiting for agent signal for #${issue}…"
 
   local signal
   signal=$(wait_for_signal "$surface" "$surface_num")
