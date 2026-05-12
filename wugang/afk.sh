@@ -16,15 +16,18 @@ setup_prereqs
 acquire_lock
 trap release_lock EXIT
 
-echo "Starting Wu Gang for $ITERATIONS iterations..."
+ui_step "🚀" "Starting Wu Gang AFK · $ITERATIONS iterations"
 echo ""
 
 for ((i=1; i<=ITERATIONS; i++)); do
-  if ! run_iteration "$i" "$ITERATIONS"; then
-    code=$?
+  set +e
+  run_iteration "$i" "$ITERATIONS"
+  code=$?
+  set -e
+  if [ "$code" -ne 0 ]; then
     if [ "$code" -eq 10 ]; then
       echo ""
-      echo "Wu Gang stopped: no eligible task right now."
+      ui_warn "Stopped: no eligible task right now."
       exit 0
     fi
     exit "$code"
@@ -32,5 +35,5 @@ for ((i=1; i<=ITERATIONS; i++)); do
   echo ""
 done
 
-echo "Completed $ITERATIONS iterations."
+ui_success "Completed $ITERATIONS iterations."
 append_progress "Wu Gang stopped: $ITERATIONS iterations exhausted"

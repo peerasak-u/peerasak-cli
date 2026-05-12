@@ -15,8 +15,30 @@ WUGANG_STARTUP_SECONDS="${WUGANG_STARTUP_SECONDS:-3}"
 
 REQUIRED_LABELS=("PRD" "AFK" "HITL")
 
-log() { echo "$*"; }
-err() { echo "Error: $*" >&2; }
+if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
+  WUGANG_BOLD=$'\033[1m'
+  WUGANG_DIM=$'\033[2m'
+  WUGANG_GREEN=$'\033[32m'
+  WUGANG_YELLOW=$'\033[33m'
+  WUGANG_RED=$'\033[31m'
+  WUGANG_BLUE=$'\033[34m'
+  WUGANG_RESET=$'\033[0m'
+else
+  WUGANG_BOLD=""
+  WUGANG_DIM=""
+  WUGANG_GREEN=""
+  WUGANG_YELLOW=""
+  WUGANG_RED=""
+  WUGANG_BLUE=""
+  WUGANG_RESET=""
+fi
+
+log() { printf '%s\n' "$*"; }
+ui_info() { printf '%s%s%s %s\n' "$WUGANG_BLUE" "ℹ" "$WUGANG_RESET" "$*"; }
+ui_success() { printf '%s%s%s %s\n' "$WUGANG_GREEN" "✓" "$WUGANG_RESET" "$*"; }
+ui_warn() { printf '%s%s%s %s\n' "$WUGANG_YELLOW" "⚠" "$WUGANG_RESET" "$*" >&2; }
+ui_step() { printf '%s%s%s %s\n' "$WUGANG_BOLD" "$1" "$WUGANG_RESET" "$2"; }
+err() { printf '%sError:%s %s\n' "$WUGANG_RED" "$WUGANG_RESET" "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 ensure_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
@@ -67,7 +89,7 @@ setup_prereqs() {
   gh auth status >/dev/null 2>&1 || die "gh auth is not ready"
   local repo
   repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-  log "Wu Gang repo: $repo"
+  ui_info "Repo: $repo"
 
   mkdir -p "$WUGANG_CONTEXT_DIR"
   touch "$WUGANG_PROGRESS_FILE"
@@ -101,7 +123,7 @@ active_prd_number() {
 
   if [ "$count" -eq 0 ]; then
     append_progress "STOP no open PRD issue"
-    log "No open PRD issue."
+    ui_warn "No open PRD issue."
     return 10
   fi
 
@@ -115,7 +137,7 @@ active_prd_number() {
   has_hitl=$(echo "$prds" | jq -r '.[0].labels[]?.name' | grep -E '^HITL$' || true)
   if [ -n "$has_hitl" ]; then
     append_progress "STOP active PRD #$num has HITL"
-    log "Active PRD #$num has HITL; waiting for human."
+    ui_warn "Active PRD #$num has HITL; waiting for human."
     return 10
   fi
 
@@ -191,7 +213,7 @@ select_afk_issue() {
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -eq 0 ]; then
     append_progress "STOP no open AFK issues"
-    log "No open AFK issues."
+    ui_warn "No open AFK issues."
     return 10
   fi
 
@@ -220,12 +242,12 @@ select_afk_issue() {
 
   if [ "$found_any_non_hitl" = false ]; then
     append_progress "STOP all AFK issues are HITL"
-    log "All AFK issues are HITL; waiting for human."
+    ui_warn "All AFK issues are HITL; waiting for human."
     return 10
   fi
 
   append_progress "STOP AFK issues exist but all blocked"
-  log "AFK issues exist but all blocked."
+  ui_warn "AFK issues exist but all blocked."
   return 10
 }
 
@@ -387,7 +409,7 @@ verify_blocked() {
 
 run_iteration() {
   local iteration="$1" total="$2"
-  log "=== Iteration $iteration/$total ==="
+  ui_step "▶" "Iteration $iteration/$total"
 
   ensure_clean_tree
 
@@ -405,37 +427,45 @@ run_iteration() {
 
   append_progress "START issue #$issue: $title (context: $context_file)"
 
+  log "  PRD:  #$prd"
+  log "  Task: #$issue — $title"
+
   local split_output surface surface_num
   split_output=$(cmux new-split right 2>&1)
   surface=$(echo "$split_output" | grep -oE 'surface:[0-9]+' | head -1)
   [ -n "$surface" ] || die "Failed to create Wu Gang pane"
   surface_num="${surface#surface:}"
 
+  log "  Pane: $surface"
+
   local start_head
   start_head=$(git rev-parse HEAD)
 
   cmux send --surface "$surface" "WUGANG_ISSUE=$issue pi @$context_file
-"
+" >/dev/null
+  ui_info "Waiting for agent signal for #$issue…"
 
   local signal
   signal=$(wait_for_signal "$surface" "$surface_num")
 
-  cmux close-surface --surface "$surface" 2>/dev/null || true
+  cmux close-surface --surface "$surface" >/dev/null 2>&1 || true
 
   case "$signal" in
     DONE)
       verify_done "$issue" "$start_head"
       append_progress "DONE issue #$issue: $title"
       rm -f "$context_file"
+      ui_success "Done #$issue — $title"
       ;;
     BLOCKED)
       verify_blocked "$issue"
       append_progress "BLOCKED issue #$issue: $title"
       rm -f "$context_file"
+      ui_warn "Blocked #$issue — $title"
       ;;
     *)
       append_progress "FAILED issue #$issue: $title (timeout/no signal, context: $context_file)"
-      die "Iteration failed: timeout/no signal"
+      die "Iteration $iteration/$total failed for #$issue — $title (timeout/no signal after ${WUGANG_TIMEOUT_SECONDS}s)"
       ;;
   esac
 }

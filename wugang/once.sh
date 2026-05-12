@@ -8,16 +8,20 @@ setup_prereqs
 acquire_lock
 trap release_lock EXIT
 
-echo "Starting Wu Gang (single iteration)..."
+ui_step "🚀" "Starting Wu Gang · single iteration"
 echo ""
 
-if ! run_iteration 1 1; then
-  code=$?
+set +e
+run_iteration 1 1
+code=$?
+set -e
+
+if [ "$code" -ne 0 ]; then
   if [ "$code" -eq 10 ]; then
-    echo "Wu Gang stopped: no eligible task right now."
+    ui_warn "Stopped: no eligible task right now."
     exit 0
   fi
   exit "$code"
 fi
 
-echo "✓ Wu Gang finished single iteration."
+ui_success "Wu Gang finished single iteration."
