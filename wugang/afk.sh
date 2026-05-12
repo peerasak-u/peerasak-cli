@@ -27,6 +27,14 @@ if [ ! -d ".git" ]; then
   exit 1
 fi
 
+# Prevent macOS idle system sleep while Wu Gang runs.
+if command -v caffeinate >/dev/null 2>&1; then
+  echo "Preventing system sleep while Wu Gang runs..."
+  caffeinate -i -w $$ &
+else
+  echo "Warning: caffeinate not found; system sleep will not be prevented."
+fi
+
 ITERATIONS=$1
 touch "$PROGRESS_FILE"
 
