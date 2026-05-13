@@ -8,6 +8,7 @@ WUGANG_DATA="$PROJECT_DIR/.wugang"
 WUGANG_CONTEXT_DIR="$WUGANG_DATA/context"
 WUGANG_PROGRESS_FILE="$WUGANG_DATA/progress.txt"
 WUGANG_LOCK_DIR="$WUGANG_DATA/run.lock"
+WUGANG_SESSION_DONE_FILE="$WUGANG_DATA/session_done_$$.txt"
 
 if [ -n "${WUGANG_TIMEOUT_SECONDS:-}" ]; then
   WUGANG_TIMEOUT_SECONDS="$WUGANG_TIMEOUT_SECONDS"
@@ -52,8 +53,16 @@ ensure_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 ensure_clean_tree() {
   # Wu Gang writes internal artifacts under .wugang/ (progress, contexts, lock).
   # Those files must not make the project look dirty for task execution.
-  if [ -n "$(git status --porcelain --untracked-files=all -- . ':(exclude).wugang')" ]; then
-    die "Working tree is dirty. Commit/stash/reset changes before running Wu Gang."
+  local dirty
+  dirty=$(git status --porcelain --untracked-files=all -- . ':(exclude).wugang')
+  if [ -n "$dirty" ]; then
+    err "Working tree is dirty. Uncommitted changes:"
+    echo "$dirty" | while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      err "  $line"
+    done
+    err "Hint: git stash or commit these changes before running Wu Gang."
+    die "(Run 'git stash push -m "wugang"' to stash, or commit manually.)"
   fi
 }
 
@@ -80,6 +89,7 @@ acquire_lock() {
 
 release_lock() {
   rm -rf "$WUGANG_LOCK_DIR"
+  rm -f "$WUGANG_SESSION_DONE_FILE"
 }
 
 setup_prereqs() {
@@ -100,6 +110,7 @@ setup_prereqs() {
 
   mkdir -p "$WUGANG_CONTEXT_DIR"
   touch "$WUGANG_PROGRESS_FILE"
+  : > "$WUGANG_SESSION_DONE_FILE"
 
   if command -v caffeinate >/dev/null 2>&1; then
     caffeinate -i -w $$ >/dev/null 2>&1 &
@@ -168,6 +179,12 @@ validate_parent_and_blocked() {
   local issue="$1" active_prd="$2"
   local data body
   data=$(gh issue view "$issue" --json number,title,body,labels,url,state)
+  local state
+  state=$(echo "$data" | jq -r '.state')
+  if [ "$state" != "OPEN" ]; then
+    return 20
+  fi
+
   body=$(echo "$data" | jq -r '.body // ""')
 
   local parent_section parent_refs parent_count parent
@@ -228,9 +245,14 @@ select_afk_issue() {
   sorted=$(echo "$issues" | jq -r 'sort_by(.number)[] | [.number, ([.labels[]?.name] | join(",")), .title] | @tsv')
 
   local found_any_non_hitl=false
+  local found_any_finished_this_run=false
   while IFS=$'\t' read -r num labels title; do
     [ -z "$num" ] && continue
     if echo "$labels" | grep -qE '(^|,)HITL(,|$)'; then
+      continue
+    fi
+    if grep -qx "$num" "$WUGANG_SESSION_DONE_FILE" 2>/dev/null; then
+      found_any_finished_this_run=true
       continue
     fi
     found_any_non_hitl=true
@@ -248,8 +270,13 @@ select_afk_issue() {
   done <<< "$sorted"
 
   if [ "$found_any_non_hitl" = false ]; then
-    append_progress "STOP all AFK issues are HITL"
-    ui_warn "All AFK issues are HITL; waiting for human."
+    if [ "$found_any_finished_this_run" = true ]; then
+      append_progress "STOP no remaining AFK issues after this run's completions"
+      ui_warn "No remaining AFK issues after this run's completions."
+    else
+      append_progress "STOP all AFK issues are HITL"
+      ui_warn "All AFK issues are HITL; waiting for human."
+    fi
     return 10
   fi
 
@@ -284,7 +311,7 @@ render_issue_markdown() {
     return 0
   fi
 
-  echo "$data" | jq -r '.comments | sort_by(.createdAt)[] | "Comment by \(.author.login // \"unknown\") at \(.createdAt):\n\(.body // \"\")\n"'
+  echo "$data" | jq -r '.comments | sort_by(.createdAt)[] | "Comment by \(.author.login // "unknown") at \(.createdAt):\n\(.body // "")\n"'
 }
 
 recent_commits_block() {
@@ -391,6 +418,20 @@ verify_done() {
   [ "$end_head" != "$start_head" ] || die "DONE but no new commit was created."
 
   commit_count=$(git rev-list --count "$start_head"..HEAD)
+  if [ "$commit_count" -gt 1 ]; then
+    ensure_clean_tree
+    local subject
+    subject=$(git log --reverse --format=%s "$start_head"..HEAD | grep -m1 "#$issue" || true)
+    [ -n "$subject" ] || subject="Complete #$issue"
+    if ! echo "$subject" | grep -q "#$issue"; then
+      subject="$subject (#$issue)"
+    fi
+    git reset --soft "$start_head"
+    git commit -m "$subject" >/dev/null
+    append_progress "SQUASH issue #$issue: collapsed $commit_count commits into one"
+    ui_info "Collapsed $commit_count commits for #$issue into one commit."
+    commit_count=$(git rev-list --count "$start_head"..HEAD)
+  fi
   [ "$commit_count" -eq 1 ] || die "DONE requires exactly one new commit (got $commit_count)."
 
   msg=$(git log -1 --pretty=%B)
@@ -460,12 +501,14 @@ run_iteration() {
   case "$signal" in
     DONE)
       verify_done "$issue" "$start_head"
+      echo "$issue" >> "$WUGANG_SESSION_DONE_FILE"
       append_progress "DONE issue #$issue: $title"
       rm -f "$context_file"
       ui_success "Done #$issue — $title"
       ;;
     BLOCKED)
       verify_blocked "$issue"
+      echo "$issue" >> "$WUGANG_SESSION_DONE_FILE"
       append_progress "BLOCKED issue #$issue: $title"
       rm -f "$context_file"
       ui_warn "Blocked #$issue — $title"
