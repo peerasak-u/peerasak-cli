@@ -411,8 +411,17 @@ verify_done() {
   local issue="$1" start_head="$2"
   local state end_head commit_count msg
 
-  state=$(gh issue view "$issue" --json state --jq .state)
-  [ "$state" = "CLOSED" ] || die "Agent signaled DONE but issue #$issue is still open."
+  # Retry a few times for GitHub sync delay
+  local retries=5
+  for i in $(seq 1 $retries); do
+    state=$(gh issue view "$issue" --json state --jq .state)
+    [ "$state" = "CLOSED" ] && break
+    if [ "$i" -lt "$retries" ]; then
+      ui_info "Issue #${issue} not yet closed (attempt $i/$retries), retrying…"
+      sleep 2
+    fi
+  done
+  [ "$state" = "CLOSED" ] || die "Agent signaled DONE but issue #$issue is still open after ${retries} retries."
 
   end_head=$(git rev-parse HEAD)
   [ "$end_head" != "$start_head" ] || die "DONE but no new commit was created."
