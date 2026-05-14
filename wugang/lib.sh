@@ -114,6 +114,9 @@ setup_prereqs() {
 
   if command -v caffeinate >/dev/null 2>&1; then
     caffeinate -i -w $$ >/dev/null 2>&1 &
+  else
+    ui_warn "caffeinate not found — mac may sleep during long AFK runs!"
+    die "caffeinate is required for Wu Gang AFK runs. Install it or run on macOS."
   fi
 
   ensure_clean_tree
